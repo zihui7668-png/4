@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Difficulty, Article, Step, WordDefinition, Sentence } from './types.ts';
+import { Difficulty, Article, Step, WordDefinition, Sentence } from './types';
 import { ARTICLES } from './constants';
 import { 
   getWordDefinition, 
@@ -68,25 +68,28 @@ const Step1BlindListening: React.FC<{ article: Article; onComplete: () => void }
   const audioContextRef = useRef<AudioContext | null>(null);
   const [loadingAudio, setLoadingAudio] = useState(false);
 
+  const getCtx = () => {
+    if (!audioContextRef.current) {
+      audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
+    }
+    return audioContextRef.current;
+  };
+
   const playFullAudio = async () => {
-    if (loadingAudio) return;
+    if (loadingAudio || isPlaying) return;
     setLoadingAudio(true);
+    const ctx = getCtx();
     try {
-      if (!audioContextRef.current) {
-        audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
-      }
-      if (audioContextRef.current.state === 'suspended') {
-        await audioContextRef.current.resume();
-      }
+      if (ctx.state === 'suspended') await ctx.resume();
 
       const fullText = article.content.map(s => s.english).join(' ');
       const base64Audio = await generateAudio(fullText);
       const bytes = decodeBase64(base64Audio);
-      const buffer = await decodeAudioData(bytes, audioContextRef.current, 24000, 1);
+      const buffer = await decodeAudioData(bytes, ctx, 24000, 1);
       
-      const source = audioContextRef.current.createBufferSource();
+      const source = ctx.createBufferSource();
       source.buffer = buffer;
-      source.connect(audioContextRef.current.destination);
+      source.connect(ctx.destination);
       source.onended = () => {
         setRepeats(prev => prev + 1);
         setIsPlaying(false);
@@ -95,6 +98,7 @@ const Step1BlindListening: React.FC<{ article: Article; onComplete: () => void }
       source.start();
     } catch (err) {
       console.error("Audio playback error:", err);
+      setIsPlaying(false);
     } finally {
       setLoadingAudio(false);
     }
@@ -140,23 +144,26 @@ const Step2Dictation: React.FC<{ article: Article; onComplete: () => void }> = (
   const [loadingAudio, setLoadingAudio] = useState(false);
   const audioContextRef = useRef<AudioContext | null>(null);
 
+  const getCtx = () => {
+    if (!audioContextRef.current) {
+      audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
+    }
+    return audioContextRef.current;
+  };
+
   const playSentence = async () => {
     setLoadingAudio(true);
+    const ctx = getCtx();
     try {
-      if (!audioContextRef.current) {
-        audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
-      }
-      if (audioContextRef.current.state === 'suspended') {
-        await audioContextRef.current.resume();
-      }
+      if (ctx.state === 'suspended') await ctx.resume();
 
       const base64Audio = await generateAudio(article.content[currentIdx].english);
       const bytes = decodeBase64(base64Audio);
-      const buffer = await decodeAudioData(bytes, audioContextRef.current, 24000, 1);
+      const buffer = await decodeAudioData(bytes, ctx, 24000, 1);
       
-      const source = audioContextRef.current.createBufferSource();
+      const source = ctx.createBufferSource();
       source.buffer = buffer;
-      source.connect(audioContextRef.current.destination);
+      source.connect(ctx.destination);
       source.start();
     } catch (err) {
       console.error("Sentence playback error:", err);
@@ -380,23 +387,26 @@ const Step4Shadowing: React.FC<{ article: Article; onComplete: () => void }> = (
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
 
+  const getCtx = () => {
+    if (!audioContextRef.current) {
+      audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
+    }
+    return audioContextRef.current;
+  };
+
   const playSentence = async () => {
     setIsPlayingModel(true);
+    const ctx = getCtx();
     try {
-      if (!audioContextRef.current) {
-        audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
-      }
-      if (audioContextRef.current.state === 'suspended') {
-        await audioContextRef.current.resume();
-      }
+      if (ctx.state === 'suspended') await ctx.resume();
 
       const base64Audio = await generateAudio(article.content[currentIdx].english);
       const bytes = decodeBase64(base64Audio);
-      const buffer = await decodeAudioData(bytes, audioContextRef.current, 24000, 1);
+      const buffer = await decodeAudioData(bytes, ctx, 24000, 1);
       
-      const source = audioContextRef.current.createBufferSource();
+      const source = ctx.createBufferSource();
       source.buffer = buffer;
-      source.connect(audioContextRef.current.destination);
+      source.connect(ctx.destination);
       source.onended = () => setIsPlayingModel(false);
       source.start();
     } catch (err) {
@@ -407,6 +417,10 @@ const Step4Shadowing: React.FC<{ article: Article; onComplete: () => void }> = (
 
   const startRecording = async () => {
     try {
+      if (!window.isSecureContext) {
+        alert("Audio recording requires a secure context (HTTPS or localhost).");
+        return;
+      }
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const recorder = new MediaRecorder(stream);
       mediaRecorderRef.current = recorder;
@@ -426,6 +440,7 @@ const Step4Shadowing: React.FC<{ article: Article; onComplete: () => void }> = (
       setAiFeedback(null);
     } catch (err) {
       console.error("Recording failed", err);
+      alert("Could not start recording. Please check microphone permissions.");
     }
   };
 
@@ -577,6 +592,13 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 pb-20">
+      {/* HTTPS Check Warning */}
+      {!window.isSecureContext && (
+        <div className="bg-orange-500 text-white p-2 text-center text-xs font-bold">
+          Warning: Secure context (HTTPS) required for microphone and audio features.
+        </div>
+      )}
+
       {/* Navbar */}
       <nav className="p-6 flex justify-between items-center border-b bg-white sticky top-0 z-50">
         <div 

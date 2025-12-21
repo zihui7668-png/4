@@ -108,35 +108,36 @@ export const analyzePronunciation = async (audioBase64: string, mimeType: string
   return JSON.parse(response.text);
 };
 
-// Standard Base64 Decoding
 export function decodeBase64(base64: string): Uint8Array {
   const binaryString = atob(base64);
-  const len = binaryString.length;
-  const bytes = new Uint8Array(len);
-  for (let i = 0; i < len; i++) {
+  const bytes = new Uint8Array(binaryString.length);
+  for (let i = 0; i < binaryString.length; i++) {
     bytes[i] = binaryString.charCodeAt(i);
   }
   return bytes;
 }
 
-// PCM Decoder - Strict adherence to instructions
 export async function decodeAudioData(
   data: Uint8Array,
   ctx: AudioContext,
   sampleRate: number = 24000,
   numChannels: number = 1,
 ): Promise<AudioBuffer> {
-  // Ensure the byte length is even for Int16Array
-  const alignedLength = Math.floor(data.byteLength / 2) * 2;
-  const dataInt16 = new Int16Array(data.buffer.slice(0, alignedLength));
-  const frameCount = dataInt16.length / numChannels;
-  const buffer = ctx.createBuffer(numChannels, frameCount, sampleRate);
-
+  // PCM 16-bit 为每采样 2 字节
+  const frameCount = Math.floor(data.byteLength / 2 / numChannels);
+  const audioBuffer = ctx.createBuffer(numChannels, frameCount, sampleRate);
+  
+  const view = new DataView(data.buffer);
   for (let channel = 0; channel < numChannels; channel++) {
-    const channelData = buffer.getChannelData(channel);
+    const channelData = audioBuffer.getChannelData(channel);
     for (let i = 0; i < frameCount; i++) {
-      channelData[i] = dataInt16[i * numChannels + channel] / 32768.0;
+      // 获取 16 位有符号整数，true 表示小端序 (Little Endian)
+      const offset = (i * numChannels + channel) * 2;
+      if (offset + 1 < data.byteLength) {
+        const sample = view.getInt16(offset, true);
+        channelData[i] = sample / 32768.0;
+      }
     }
   }
-  return buffer;
+  return audioBuffer;
 }
