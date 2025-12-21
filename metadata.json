@@ -1,0 +1,7 @@
+{
+  "name": "FluentStep - English Mastery",
+  "description": "A comprehensive English learning app using a 5-step immersive pedagogy: Blind Listening, Dictation, Comprehension, Verification, and Shadowing.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
