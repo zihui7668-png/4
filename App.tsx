@@ -1,8 +1,15 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Difficulty, Article, Step, WordDefinition, Sentence } from './types.ts';
+import { Difficulty, Article, Step, WordDefinition, Sentence } from './types';
 import { ARTICLES } from './constants';
-import { getWordDefinition, verifyTranslation, generateAudio, decodePCM, analyzePronunciation } from './services/geminiService';
+import { 
+  getWordDefinition, 
+  verifyTranslation, 
+  generateAudio, 
+  decodeBase64, 
+  decodeAudioData, 
+  analyzePronunciation 
+} from './services/geminiService';
 
 // --- Shared Components ---
 
@@ -65,10 +72,17 @@ const Step1BlindListening: React.FC<{ article: Article; onComplete: () => void }
     if (loadingAudio) return;
     setLoadingAudio(true);
     try {
-      if (!audioContextRef.current) audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+      if (!audioContextRef.current) {
+        audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
+      }
+      if (audioContextRef.current.state === 'suspended') {
+        await audioContextRef.current.resume();
+      }
+
       const fullText = article.content.map(s => s.english).join(' ');
-      const pcmData = await generateAudio(fullText);
-      const buffer = await decodePCM(pcmData, audioContextRef.current);
+      const base64Audio = await generateAudio(fullText);
+      const bytes = decodeBase64(base64Audio);
+      const buffer = await decodeAudioData(bytes, audioContextRef.current, 24000, 1);
       
       const source = audioContextRef.current.createBufferSource();
       source.buffer = buffer;
@@ -80,7 +94,7 @@ const Step1BlindListening: React.FC<{ article: Article; onComplete: () => void }
       setIsPlaying(true);
       source.start();
     } catch (err) {
-      console.error(err);
+      console.error("Audio playback error:", err);
     } finally {
       setLoadingAudio(false);
     }
@@ -129,15 +143,23 @@ const Step2Dictation: React.FC<{ article: Article; onComplete: () => void }> = (
   const playSentence = async () => {
     setLoadingAudio(true);
     try {
-      if (!audioContextRef.current) audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
-      const pcmData = await generateAudio(article.content[currentIdx].english);
-      const buffer = await decodePCM(pcmData, audioContextRef.current);
+      if (!audioContextRef.current) {
+        audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
+      }
+      if (audioContextRef.current.state === 'suspended') {
+        await audioContextRef.current.resume();
+      }
+
+      const base64Audio = await generateAudio(article.content[currentIdx].english);
+      const bytes = decodeBase64(base64Audio);
+      const buffer = await decodeAudioData(bytes, audioContextRef.current, 24000, 1);
+      
       const source = audioContextRef.current.createBufferSource();
       source.buffer = buffer;
       source.connect(audioContextRef.current.destination);
       source.start();
     } catch (err) {
-      console.error(err);
+      console.error("Sentence playback error:", err);
     } finally {
       setLoadingAudio(false);
     }
@@ -361,16 +383,24 @@ const Step4Shadowing: React.FC<{ article: Article; onComplete: () => void }> = (
   const playSentence = async () => {
     setIsPlayingModel(true);
     try {
-      if (!audioContextRef.current) audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
-      const pcmData = await generateAudio(article.content[currentIdx].english);
-      const buffer = await decodePCM(pcmData, audioContextRef.current);
+      if (!audioContextRef.current) {
+        audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
+      }
+      if (audioContextRef.current.state === 'suspended') {
+        await audioContextRef.current.resume();
+      }
+
+      const base64Audio = await generateAudio(article.content[currentIdx].english);
+      const bytes = decodeBase64(base64Audio);
+      const buffer = await decodeAudioData(bytes, audioContextRef.current, 24000, 1);
+      
       const source = audioContextRef.current.createBufferSource();
       source.buffer = buffer;
       source.connect(audioContextRef.current.destination);
       source.onended = () => setIsPlayingModel(false);
       source.start();
     } catch (err) {
-      console.error(err);
+      console.error("Shadowing playback error:", err);
       setIsPlayingModel(false);
     }
   };
@@ -403,7 +433,6 @@ const Step4Shadowing: React.FC<{ article: Article; onComplete: () => void }> = (
     if (mediaRecorderRef.current && isRecording) {
       mediaRecorderRef.current.stop();
       setIsRecording(false);
-      // Stop all tracks to release microphone
       mediaRecorderRef.current.stream.getTracks().forEach(track => track.stop());
     }
   };

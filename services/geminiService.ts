@@ -71,7 +71,7 @@ export const generateAudio = async (text: string): Promise<string> => {
   const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
   if (!base64Audio) throw new Error("Audio generation failed");
   
-  return `data:audio/pcm;base64,${base64Audio}`;
+  return base64Audio;
 };
 
 export const analyzePronunciation = async (audioBase64: string, mimeType: string, expectedText: string) => {
@@ -108,19 +108,35 @@ export const analyzePronunciation = async (audioBase64: string, mimeType: string
   return JSON.parse(response.text);
 };
 
-// PCM Decoder Helper
-export const decodePCM = async (base64: string, ctx: AudioContext) => {
-  const binary = atob(base64.split(',')[1]);
-  const len = binary.length;
+// Standard Base64 Decoding
+export function decodeBase64(base64: string): Uint8Array {
+  const binaryString = atob(base64);
+  const len = binaryString.length;
   const bytes = new Uint8Array(len);
   for (let i = 0; i < len; i++) {
-    bytes[i] = binary.charCodeAt(i);
+    bytes[i] = binaryString.charCodeAt(i);
   }
-  const dataInt16 = new Int16Array(bytes.buffer);
-  const buffer = ctx.createBuffer(1, dataInt16.length, 24000);
-  const channelData = buffer.getChannelData(0);
-  for (let i = 0; i < dataInt16.length; i++) {
-    channelData[i] = dataInt16[i] / 32768.0;
+  return bytes;
+}
+
+// PCM Decoder - Strict adherence to instructions
+export async function decodeAudioData(
+  data: Uint8Array,
+  ctx: AudioContext,
+  sampleRate: number = 24000,
+  numChannels: number = 1,
+): Promise<AudioBuffer> {
+  // Ensure the byte length is even for Int16Array
+  const alignedLength = Math.floor(data.byteLength / 2) * 2;
+  const dataInt16 = new Int16Array(data.buffer.slice(0, alignedLength));
+  const frameCount = dataInt16.length / numChannels;
+  const buffer = ctx.createBuffer(numChannels, frameCount, sampleRate);
+
+  for (let channel = 0; channel < numChannels; channel++) {
+    const channelData = buffer.getChannelData(channel);
+    for (let i = 0; i < frameCount; i++) {
+      channelData[i] = dataInt16[i * numChannels + channel] / 32768.0;
+    }
   }
   return buffer;
-};
+}
