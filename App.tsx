@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Difficulty, Article, Step, WordDefinition, Sentence } from './types';
+import { Difficulty, Article, Step, WordDefinition, Sentence } from './types.ts';
 import { ARTICLES } from './constants';
 import { 
   getWordDefinition, 
