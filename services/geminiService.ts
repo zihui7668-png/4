@@ -1,7 +1,7 @@
 
 import { GoogleGenAI, Type, Modality } from "@google/genai";
 
-const API_KEY = "AIzaSyBehYXQ09r1cjt6ABB0eOLyEWA14MF31J0";
+const API_KEY = "AIzaSyD3pjF5HLo1xvcKLMjl4gUAxyWc58C5XE4";
 const ai = new GoogleGenAI({ apiKey: API_KEY });
 
 export const getWordDefinition = async (word: string) => {
