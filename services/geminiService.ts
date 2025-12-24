@@ -1,7 +1,7 @@
 
 import { GoogleGenAI, Type, Modality } from "@google/genai";
 
-const API_KEY = "AIzaSyD3pjF5HLo1xvcKLMjl4gUAxyWc58C5XE4";
+const API_KEY = import.meta.env.VITE_GEMINI_KEY || ""; 
 const ai = new GoogleGenAI({ apiKey: API_KEY });
 
 export const getWordDefinition = async (word: string) => {
