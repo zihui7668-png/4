@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Difficulty, Article, Step, WordDefinition, Sentence } from './types.ts';
+import { Difficulty, Article, Step, WordDefinition, Sentence } from './types';
 import { ARTICLES } from './constants';
 import { 
   getWordDefinition, 
@@ -21,6 +21,35 @@ const ProgressBar: React.FC<{ current: number; total: number }> = ({ current, to
     ></div>
   </div>
 );
+
+// --- Audio Manager Hook ---
+const useAudio = () => {
+  const audioContextRef = useRef<AudioContext | null>(null);
+
+  const initContext = useCallback(async () => {
+    if (!audioContextRef.current) {
+      const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+      audioContextRef.current = new AudioContextClass({ sampleRate: 24000 });
+    }
+    if (audioContextRef.current.state === 'suspended') {
+      await audioContextRef.current.resume();
+    }
+    return audioContextRef.current;
+  }, []);
+
+  const playBuffer = useCallback(async (base64: string) => {
+    const ctx = await initContext();
+    const bytes = decodeBase64(base64);
+    const buffer = await decodeAudioData(bytes, ctx, 24000, 1);
+    
+    const source = ctx.createBufferSource();
+    source.buffer = buffer;
+    source.connect(ctx.destination);
+    return source;
+  }, [initContext]);
+
+  return { initContext, playBuffer };
+};
 
 // --- Step Components ---
 
@@ -65,37 +94,23 @@ const Step0Selection: React.FC<{ onSelect: (article: Article) => void }> = ({ on
 const Step1BlindListening: React.FC<{ article: Article; onComplete: () => void }> = ({ article, onComplete }) => {
   const [repeats, setRepeats] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
-  const audioContextRef = useRef<AudioContext | null>(null);
   const [loadingAudio, setLoadingAudio] = useState(false);
+  const { playBuffer } = useAudio();
 
-  const getCtx = () => {
-    if (!audioContextRef.current) {
-      audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
-    }
-    return audioContextRef.current;
-  };
-
-  const playFullAudio = async () => {
+  const handlePlay = async () => {
     if (loadingAudio || isPlaying) return;
     setLoadingAudio(true);
-    const ctx = getCtx();
     try {
-      if (ctx.state === 'suspended') await ctx.resume();
-
       const fullText = article.content.map(s => s.english).join(' ');
       const base64Audio = await generateAudio(fullText);
-      const bytes = decodeBase64(base64Audio);
-      const buffer = await decodeAudioData(bytes, ctx, 24000, 1);
+      const source = await playBuffer(base64Audio);
       
-      const source = ctx.createBufferSource();
-      source.buffer = buffer;
-      source.connect(ctx.destination);
       source.onended = () => {
         setRepeats(prev => prev + 1);
         setIsPlaying(false);
       };
       setIsPlaying(true);
-      source.start();
+      source.start(0);
     } catch (err) {
       console.error("Audio playback error:", err);
       setIsPlaying(false);
@@ -117,7 +132,7 @@ const Step1BlindListening: React.FC<{ article: Article; onComplete: () => void }
       <div className="text-6xl font-black text-blue-600 mb-8">{repeats}/3</div>
 
       <button
-        onClick={playFullAudio}
+        onClick={handlePlay}
         disabled={isPlaying || loadingAudio}
         className={`px-10 py-4 rounded-full font-bold text-lg shadow-lg transition-all ${
           isPlaying || loadingAudio ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : 'bg-blue-600 text-white hover:bg-blue-700'
@@ -142,29 +157,14 @@ const Step2Dictation: React.FC<{ article: Article; onComplete: () => void }> = (
   const [currentIdx, setCurrentIdx] = useState(0);
   const [userInput, setUserInput] = useState("");
   const [loadingAudio, setLoadingAudio] = useState(false);
-  const audioContextRef = useRef<AudioContext | null>(null);
+  const { playBuffer } = useAudio();
 
-  const getCtx = () => {
-    if (!audioContextRef.current) {
-      audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
-    }
-    return audioContextRef.current;
-  };
-
-  const playSentence = async () => {
+  const handlePlaySentence = async () => {
     setLoadingAudio(true);
-    const ctx = getCtx();
     try {
-      if (ctx.state === 'suspended') await ctx.resume();
-
       const base64Audio = await generateAudio(article.content[currentIdx].english);
-      const bytes = decodeBase64(base64Audio);
-      const buffer = await decodeAudioData(bytes, ctx, 24000, 1);
-      
-      const source = ctx.createBufferSource();
-      source.buffer = buffer;
-      source.connect(ctx.destination);
-      source.start();
+      const source = await playBuffer(base64Audio);
+      source.start(0);
     } catch (err) {
       console.error("Sentence playback error:", err);
     } finally {
@@ -191,7 +191,7 @@ const Step2Dictation: React.FC<{ article: Article; onComplete: () => void }> = (
 
       <div className="bg-blue-50 p-12 rounded-2xl mb-6 text-center">
         <button
-          onClick={playSentence}
+          onClick={handlePlaySentence}
           disabled={loadingAudio}
           className="w-20 h-20 bg-blue-600 text-white rounded-full flex items-center justify-center shadow-lg hover:scale-105 transition-transform mx-auto mb-4"
         >
@@ -383,32 +383,17 @@ const Step4Shadowing: React.FC<{ article: Article; onComplete: () => void }> = (
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [aiFeedback, setAiFeedback] = useState<any>(null);
   
-  const audioContextRef = useRef<AudioContext | null>(null);
+  const { playBuffer } = useAudio();
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
 
-  const getCtx = () => {
-    if (!audioContextRef.current) {
-      audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
-    }
-    return audioContextRef.current;
-  };
-
-  const playSentence = async () => {
+  const handlePlaySentence = async () => {
     setIsPlayingModel(true);
-    const ctx = getCtx();
     try {
-      if (ctx.state === 'suspended') await ctx.resume();
-
       const base64Audio = await generateAudio(article.content[currentIdx].english);
-      const bytes = decodeBase64(base64Audio);
-      const buffer = await decodeAudioData(bytes, ctx, 24000, 1);
-      
-      const source = ctx.createBufferSource();
-      source.buffer = buffer;
-      source.connect(ctx.destination);
+      const source = await playBuffer(base64Audio);
       source.onended = () => setIsPlayingModel(false);
-      source.start();
+      source.start(0);
     } catch (err) {
       console.error("Shadowing playback error:", err);
       setIsPlayingModel(false);
@@ -499,7 +484,7 @@ const Step4Shadowing: React.FC<{ article: Article; onComplete: () => void }> = (
 
       <div className="flex justify-center items-center gap-12 mb-10">
         <button
-          onClick={playSentence}
+          onClick={handlePlaySentence}
           disabled={isPlayingModel || isRecording || isAnalyzing}
           className="flex flex-col items-center group disabled:opacity-50"
         >
@@ -575,8 +560,15 @@ const Step4Shadowing: React.FC<{ article: Article; onComplete: () => void }> = (
 export default function App() {
   const [currentStep, setCurrentStep] = useState<Step>(Step.Selection);
   const [selectedArticle, setSelectedArticle] = useState<Article | null>(null);
+  const { initContext } = useAudio();
 
-  const startLesson = (article: Article) => {
+  const handleStartLesson = async (article: Article) => {
+    // 关键点：在用户点击选择文章的瞬间，激活音频上下文
+    try {
+      await initContext();
+    } catch (e) {
+      console.warn("Failed to prime audio context", e);
+    }
     setSelectedArticle(article);
     setCurrentStep(Step.BlindListening);
   };
@@ -629,7 +621,7 @@ export default function App() {
 
       {/* Main Content Area */}
       <main className="container mx-auto mt-12 px-4">
-        {currentStep === Step.Selection && <Step0Selection onSelect={startLesson} />}
+        {currentStep === Step.Selection && <Step0Selection onSelect={handleStartLesson} />}
         
         {selectedArticle && currentStep === Step.BlindListening && (
           <Step1BlindListening article={selectedArticle} onComplete={handleStepComplete} />
