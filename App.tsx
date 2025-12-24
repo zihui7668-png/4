@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Difficulty, Article, Step, WordDefinition, Sentence } from './types.ts';
+import { Difficulty, Article, Step, WordDefinition, Sentence } from './types';
 import { ARTICLES } from './constants';
 import { 
   getWordDefinition, 
@@ -28,26 +28,18 @@ let globalAudioCtx: AudioContext | null = null;
 const getAudioCtx = () => {
   if (!globalAudioCtx) {
     const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
-    globalAudioCtx = new AudioContextClass({ sampleRate: 24000 });
+    // Don't fix sampleRate here, let the hardware decide for maximum compatibility
+    globalAudioCtx = new AudioContextClass();
   }
   return globalAudioCtx;
 };
 
 // --- Audio Manager Hook ---
 const useAudio = () => {
-  const initContext = useCallback(async () => {
-    const ctx = getAudioCtx();
-    if (ctx.state === 'suspended') {
-      await ctx.resume();
-    }
-    return ctx;
-  }, []);
-
   const playBuffer = useCallback(async (base64: string) => {
     const ctx = getAudioCtx();
-    // CRITICAL: We don't await resume here because it might lose the user gesture token
-    // It should have been resumed in the top-level click handler
     const bytes = decodeBase64(base64);
+    // Source data is 24k
     const buffer = await decodeAudioData(bytes, ctx, 24000, 1);
     
     const source = ctx.createBufferSource();
@@ -56,7 +48,15 @@ const useAudio = () => {
     return source;
   }, []);
 
-  return { initContext, playBuffer };
+  const resumeCtx = useCallback(async () => {
+    const ctx = getAudioCtx();
+    if (ctx.state === 'suspended') {
+      await ctx.resume();
+    }
+    return ctx;
+  }, []);
+
+  return { resumeCtx, playBuffer };
 };
 
 // --- Step Components ---
@@ -103,21 +103,24 @@ const Step1BlindListening: React.FC<{ article: Article; onComplete: () => void }
   const [repeats, setRepeats] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [loadingAudio, setLoadingAudio] = useState(false);
-  const { initContext, playBuffer } = useAudio();
+  const { resumeCtx, playBuffer } = useAudio();
 
   const handlePlay = async () => {
     if (loadingAudio || isPlaying) return;
     
-    // SYNC: Resume context immediately in click event
+    // CRITICAL: Resume context synchronously in the UI thread
     const ctx = getAudioCtx();
-    if (ctx.state === 'suspended') ctx.resume();
+    const resumePromise = ctx.state === 'suspended' ? ctx.resume() : Promise.resolve();
 
     setLoadingAudio(true);
     try {
       const fullText = article.content.map(s => s.english).join(' ');
       const base64Audio = await generateAudio(fullText);
-      const source = await playBuffer(base64Audio);
       
+      // Ensure it is fully resumed after async fetch
+      await resumePromise;
+      
+      const source = await playBuffer(base64Audio);
       source.onended = () => {
         setRepeats(prev => prev + 1);
         setIsPlaying(false);
@@ -127,6 +130,7 @@ const Step1BlindListening: React.FC<{ article: Article; onComplete: () => void }
     } catch (err) {
       console.error("Audio playback error:", err);
       setIsPlaying(false);
+      alert("Playback failed. Please try again.");
     } finally {
       setLoadingAudio(false);
     }
@@ -148,7 +152,7 @@ const Step1BlindListening: React.FC<{ article: Article; onComplete: () => void }
         onClick={handlePlay}
         disabled={isPlaying || loadingAudio}
         className={`px-10 py-4 rounded-full font-bold text-lg shadow-lg transition-all ${
-          isPlaying || loadingAudio ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : 'bg-blue-600 text-white hover:bg-blue-700'
+          isPlaying || loadingAudio ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : 'bg-blue-600 text-white hover:bg-blue-700 active:scale-95'
         }`}
       >
         {loadingAudio ? 'Generating Audio...' : isPlaying ? 'Listening...' : 'Play Audio'}
@@ -173,13 +177,13 @@ const Step2Dictation: React.FC<{ article: Article; onComplete: () => void }> = (
   const { playBuffer } = useAudio();
 
   const handlePlaySentence = async () => {
-    // SYNC: Resume context
     const ctx = getAudioCtx();
-    if (ctx.state === 'suspended') ctx.resume();
+    const resumePromise = ctx.state === 'suspended' ? ctx.resume() : Promise.resolve();
 
     setLoadingAudio(true);
     try {
       const base64Audio = await generateAudio(article.content[currentIdx].english);
+      await resumePromise;
       const source = await playBuffer(base64Audio);
       source.start(0);
     } catch (err) {
@@ -210,7 +214,7 @@ const Step2Dictation: React.FC<{ article: Article; onComplete: () => void }> = (
         <button
           onClick={handlePlaySentence}
           disabled={loadingAudio}
-          className="w-20 h-20 bg-blue-600 text-white rounded-full flex items-center justify-center shadow-lg hover:scale-105 transition-transform mx-auto mb-4"
+          className="w-20 h-20 bg-blue-600 text-white rounded-full flex items-center justify-center shadow-lg hover:scale-105 active:scale-95 transition-transform mx-auto mb-4"
         >
           {loadingAudio ? (
             <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-white"></div>
@@ -405,13 +409,13 @@ const Step4Shadowing: React.FC<{ article: Article; onComplete: () => void }> = (
   const audioChunksRef = useRef<Blob[]>([]);
 
   const handlePlaySentence = async () => {
-    // SYNC: Resume context
     const ctx = getAudioCtx();
-    if (ctx.state === 'suspended') ctx.resume();
+    const resumePromise = ctx.state === 'suspended' ? ctx.resume() : Promise.resolve();
 
     setIsPlayingModel(true);
     try {
       const base64Audio = await generateAudio(article.content[currentIdx].english);
+      await resumePromise;
       const source = await playBuffer(base64Audio);
       source.onended = () => setIsPlayingModel(false);
       source.start(0);
@@ -428,9 +432,8 @@ const Step4Shadowing: React.FC<{ article: Article; onComplete: () => void }> = (
         return;
       }
       
-      // SYNC: Resume context before stream
       const ctx = getAudioCtx();
-      if (ctx.state === 'suspended') ctx.resume();
+      if (ctx.state === 'suspended') await ctx.resume();
 
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const recorder = new MediaRecorder(stream);
@@ -586,12 +589,12 @@ const Step4Shadowing: React.FC<{ article: Article; onComplete: () => void }> = (
 export default function App() {
   const [currentStep, setCurrentStep] = useState<Step>(Step.Selection);
   const [selectedArticle, setSelectedArticle] = useState<Article | null>(null);
-  const { initContext } = useAudio();
+  const { resumeCtx } = useAudio();
 
   const handleStartLesson = async (article: Article) => {
-    // 关键点：在用户点击选择文章的瞬间，立即激活音频上下文
+    // SYNC: Prime context on first real user gesture
     try {
-      await initContext();
+      await resumeCtx();
     } catch (e) {
       console.warn("Failed to prime audio context", e);
     }
