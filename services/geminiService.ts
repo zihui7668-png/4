@@ -1,7 +1,7 @@
 
 import { GoogleGenAI, Type, Modality } from "@google/genai";
 
-const API_KEY = "AIzaSyBehYXQ09r1cjt6ABB0eOLyEWA14MF31J0";
+const API_KEY = process.env.API_KEY || "";
 const ai = new GoogleGenAI({ apiKey: API_KEY });
 
 export const getWordDefinition = async (word: string) => {
@@ -118,7 +118,7 @@ export function decodeBase64(base64: string): Uint8Array {
 }
 
 /**
- * Optimized PCM Decoder for mobile browsers
+ * Optimized PCM Decoder - robust for all mobile browsers
  */
 export async function decodeAudioData(
   data: Uint8Array,
@@ -126,9 +126,9 @@ export async function decodeAudioData(
   sampleRate: number = 24000,
   numChannels: number = 1,
 ): Promise<AudioBuffer> {
-  // Ensure we are working with an aligned buffer for DataView
+  // Use a temporary Buffer to ensure alignment
   const arrayBuffer = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength);
-  const frameCount = Math.floor(arrayBuffer.byteLength / 2 / numChannels);
+  const frameCount = Math.floor(arrayBuffer.byteLength / (2 * numChannels));
   const audioBuffer = ctx.createBuffer(numChannels, frameCount, sampleRate);
   
   const view = new DataView(arrayBuffer);
@@ -137,8 +137,10 @@ export async function decodeAudioData(
     for (let i = 0; i < frameCount; i++) {
       const offset = (i * numChannels + channel) * 2;
       // Int16 signed PCM
-      const sample = view.getInt16(offset, true);
-      channelData[i] = sample / 32768.0;
+      if (offset + 1 < arrayBuffer.byteLength) {
+        const sample = view.getInt16(offset, true);
+        channelData[i] = sample / 32768.0;
+      }
     }
   }
   return audioBuffer;

@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Difficulty, Article, Step, WordDefinition, Sentence } from './types.ts';
+import { Difficulty, Article, Step, WordDefinition, Sentence } from './types';
 import { ARTICLES } from './constants';
 import { 
   getWordDefinition, 
@@ -22,23 +22,31 @@ const ProgressBar: React.FC<{ current: number; total: number }> = ({ current, to
   </div>
 );
 
+// --- Global Audio Singleton ---
+let globalAudioCtx: AudioContext | null = null;
+
+const getAudioCtx = () => {
+  if (!globalAudioCtx) {
+    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+    globalAudioCtx = new AudioContextClass({ sampleRate: 24000 });
+  }
+  return globalAudioCtx;
+};
+
 // --- Audio Manager Hook ---
 const useAudio = () => {
-  const audioContextRef = useRef<AudioContext | null>(null);
-
   const initContext = useCallback(async () => {
-    if (!audioContextRef.current) {
-      const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
-      audioContextRef.current = new AudioContextClass({ sampleRate: 24000 });
+    const ctx = getAudioCtx();
+    if (ctx.state === 'suspended') {
+      await ctx.resume();
     }
-    if (audioContextRef.current.state === 'suspended') {
-      await audioContextRef.current.resume();
-    }
-    return audioContextRef.current;
+    return ctx;
   }, []);
 
   const playBuffer = useCallback(async (base64: string) => {
-    const ctx = await initContext();
+    const ctx = getAudioCtx();
+    // CRITICAL: We don't await resume here because it might lose the user gesture token
+    // It should have been resumed in the top-level click handler
     const bytes = decodeBase64(base64);
     const buffer = await decodeAudioData(bytes, ctx, 24000, 1);
     
@@ -46,7 +54,7 @@ const useAudio = () => {
     source.buffer = buffer;
     source.connect(ctx.destination);
     return source;
-  }, [initContext]);
+  }, []);
 
   return { initContext, playBuffer };
 };
@@ -95,10 +103,15 @@ const Step1BlindListening: React.FC<{ article: Article; onComplete: () => void }
   const [repeats, setRepeats] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [loadingAudio, setLoadingAudio] = useState(false);
-  const { playBuffer } = useAudio();
+  const { initContext, playBuffer } = useAudio();
 
   const handlePlay = async () => {
     if (loadingAudio || isPlaying) return;
+    
+    // SYNC: Resume context immediately in click event
+    const ctx = getAudioCtx();
+    if (ctx.state === 'suspended') ctx.resume();
+
     setLoadingAudio(true);
     try {
       const fullText = article.content.map(s => s.english).join(' ');
@@ -160,6 +173,10 @@ const Step2Dictation: React.FC<{ article: Article; onComplete: () => void }> = (
   const { playBuffer } = useAudio();
 
   const handlePlaySentence = async () => {
+    // SYNC: Resume context
+    const ctx = getAudioCtx();
+    if (ctx.state === 'suspended') ctx.resume();
+
     setLoadingAudio(true);
     try {
       const base64Audio = await generateAudio(article.content[currentIdx].english);
@@ -388,6 +405,10 @@ const Step4Shadowing: React.FC<{ article: Article; onComplete: () => void }> = (
   const audioChunksRef = useRef<Blob[]>([]);
 
   const handlePlaySentence = async () => {
+    // SYNC: Resume context
+    const ctx = getAudioCtx();
+    if (ctx.state === 'suspended') ctx.resume();
+
     setIsPlayingModel(true);
     try {
       const base64Audio = await generateAudio(article.content[currentIdx].english);
@@ -406,6 +427,11 @@ const Step4Shadowing: React.FC<{ article: Article; onComplete: () => void }> = (
         alert("Audio recording requires a secure context (HTTPS or localhost).");
         return;
       }
+      
+      // SYNC: Resume context before stream
+      const ctx = getAudioCtx();
+      if (ctx.state === 'suspended') ctx.resume();
+
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const recorder = new MediaRecorder(stream);
       mediaRecorderRef.current = recorder;
@@ -563,7 +589,7 @@ export default function App() {
   const { initContext } = useAudio();
 
   const handleStartLesson = async (article: Article) => {
-    // 关键点：在用户点击选择文章的瞬间，激活音频上下文
+    // 关键点：在用户点击选择文章的瞬间，立即激活音频上下文
     try {
       await initContext();
     } catch (e) {
