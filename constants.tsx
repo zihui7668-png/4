@@ -1,4 +1,20 @@
+import { GoogleGenAI } from "@google/generative-ai";
 
+// 从环境变量读取，如果读取不到则为空字符串
+// 这样即便代码公开，别人也看不到你的 Key
+const API_KEY = import.meta.env.VITE_GEMINI_KEY || ""; 
+
+const genAI = new GoogleGenAI(API_KEY);
+
+export const chatWithGemini = async (prompt: string) => {
+  if (!API_KEY) {
+    throw new Error("API Key 未配置，请检查环境变量");
+  }
+  
+  const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+  const result = await model.generateContent(prompt);
+  return result.response.text();
+};
 import { Difficulty, Article } from './types';
 
 export const ARTICLES: Article[] = [
