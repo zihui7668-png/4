@@ -5,7 +5,7 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 const API_KEY = import.meta.env.VITE_GEMINI_KEY || ""; 
 // 在 App.tsx 或相关逻辑文件中
 
-const genAI = new GoogleGenAI(API_KEY);
+const genAI = new GoogleGenerativeAI(import.meta.env.VITE_GEMINI_KEY);
 
 export const chatWithGemini = async (prompt: string) => {
   if (!API_KEY) {
