@@ -1,4 +1,4 @@
-import { GoogleGenAI } from "@google/generative-ai";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 
 // 从环境变量读取，如果读取不到则为空字符串
 // 这样即便代码公开，别人也看不到你的 Key
