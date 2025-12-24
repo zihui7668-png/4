@@ -3,6 +3,7 @@ import { GoogleGenAI } from "@google/generative-ai";
 // 从环境变量读取，如果读取不到则为空字符串
 // 这样即便代码公开，别人也看不到你的 Key
 const API_KEY = import.meta.env.VITE_GEMINI_KEY || ""; 
+// 在 App.tsx 或相关逻辑文件中
 
 const genAI = new GoogleGenAI(API_KEY);
 
